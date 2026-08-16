@@ -26,7 +26,7 @@ const MAX_RESIDENTS = 30;
 const AUTOPLAY_MS = 1500;
 const BABY_NAMES = ["몽이", "콩이", "하늘이", "별이", "달이", "솜이", "복이", "구름이", "봄이", "여름이", "라온이", "다온이"];
 
-const GOD_ITEMS = [
+const DEFAULT_GOD_ITEMS = [
   { id: "fruit", icon: "🍎", label: "신선한 과일", desc: "배고픔 -40", type: "hunger", amount: 40, needsTarget: false },
   { id: "cake", icon: "🍰", label: "축제 케이크", desc: "배고픔 완전 회복", type: "hunger", amount: 100, needsTarget: false },
   { id: "blanket", icon: "🧸", label: "포근한 담요", desc: "외로움 -35", type: "loneliness", amount: 35, needsTarget: false },
@@ -35,6 +35,15 @@ const GOD_ITEMS = [
   { id: "flower", icon: "🌸", label: "축복의 꽃다발", desc: "지목한 상대와 호감도 +15", type: "relationship", amount: 15, needsTarget: true },
   { id: "ring", icon: "💍", label: "언약의 반지", desc: "지목한 상대와 호감도 +25 (결혼이 가까워져요)", type: "relationship", amount: 25, needsTarget: true },
   { id: "hanky", icon: "🕊️", label: "화해의 손수건", desc: "마이너스 호감도를 0으로 씻어줘요", type: "reconcile", needsTarget: true },
+];
+
+const RELATION_PRESETS = [
+  { value: "지인", label: "지인 (기본)", score: 0 },
+  { value: "친구", label: "친구", score: 40 },
+  { value: "절친", label: "절친", score: 80 },
+  { value: "앙숙", label: "앙숙", score: -50 },
+  { value: "연인", label: "연인 💑", score: 85 },
+  { value: "결혼", label: "결혼 💍", score: 85 },
 ];
 
 const TALK_RESPONSES = [
@@ -47,6 +56,37 @@ const TALK_RESPONSES = [
   "오늘 하루도 힘내볼게요, 응원해줘서 고마워요!",
   "가끔은 당신이 진짜 존재하나 궁금했는데... 지금은 확실히 느껴져요.",
 ];
+
+const QUIRKY_EVENTS = [
+  (name) => `🎪 ${name}가 갑자기 물구나무를 서서 걸어다니기 시작했습니다! 다들 어리둥절해합니다.`,
+  (name) => `🍄 ${name}가 숲에서 신비한 버섯을 발견하고 하루 종일 몽롱한 기분을 느꼈습니다.`,
+  (name) => `🎨 ${name}가 밤새 아일랜드 벽에 정체불명의 그림을 그려놓았습니다.`,
+  (name) => `🌊 ${name}가 파도에 떠밀려온 낡은 보물 상자를 발견했습니다!`,
+  (name) => `🦄 ${name}가 무지개 뒤에서 신비한 존재를 봤다고 주장합니다.`,
+  (name) => `🎤 ${name}가 갑자기 즉흥 랩을 시작해서 주민들을 깜짝 놀라게 했습니다.`,
+  (name) => `🐚 ${name}가 조개껍질에서 나는 소리를 듣고 알 수 없는 눈물을 흘렸습니다.`,
+  (name) => `🔥 ${name}가 요리를 하다가 작은 불쇼를 선보였습니다 (다행히 다치지 않았어요).`,
+  (name) => `🧭 ${name}가 나침반도 없이 섬을 한 바퀴 완주하고 돌아왔습니다.`,
+  (name) => `👻 ${name}가 한밤중에 이상한 그림자를 보고 소리를 질렀습니다.`,
+  (name) => `🪁 ${name}가 직접 만든 연을 날리다가 하늘로 살짝 떠올랐다고 주장합니다.`,
+  (name) => `🎁 ${name}가 정체불명의 선물 상자를 발견했지만 열어보길 망설이고 있습니다.`,
+];
+
+const NOTE_STOPWORDS = new Set([
+  "그리고", "그러나", "그래서", "정말", "너무", "진짜", "아주", "매우", "같아요", "싶어요", "합니다", "입니다",
+  "있어요", "해요", "조금", "항상", "자주", "그냥", "약간", "엄청", "완전", "등등", "등", "걸", "것", "거",
+  "수", "때", "좀", "막", "또", "그", "저", "나", "제가", "저는", "그는", "그녀는", "이런", "저런", "그런",
+  "하는", "하고", "하지만", "때문에", "위해", "위한", "대한", "대해", "정도", "사람", "성격",
+]);
+function extractKeywords(note) {
+  if (!note) return [];
+  const tokens = note
+    .replace(/[.,!?~^ㅋㅎㅠㅜ:;()"'\n\r]+/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !NOTE_STOPWORDS.has(t));
+  return Array.from(new Set(tokens)).slice(0, 8);
+}
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -83,7 +123,7 @@ function statusColor(status) {
 }
 
 function MoaIslandSim() {
-  const [islandName, setIslandName] = useState("무지개 아일랜드");
+  const [islandName, setIslandName] = useState("");
   const [characters, setCharacters] = useState([]);
   const [relationships, setRelationships] = useState({});
   const [eventLog, setEventLog] = useState([]);
@@ -93,10 +133,8 @@ function MoaIslandSim() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [namingBaby, setNamingBaby] = useState(null);
   const [babyNameInput, setBabyNameInput] = useState("");
-
-  // 브라우저 저장용 상태
-  const STORAGE_KEY = "moa-island-sim-react-v1";
-  const [storageLoaded, setStorageLoaded] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [selectedCharId, setSelectedCharId] = useState(null);
 
   const [formName, setFormName] = useState("");
   const [formType, setFormType] = useState("");
@@ -104,65 +142,20 @@ function MoaIslandSim() {
   const [formEmo, setFormEmo] = useState(50);
   const [formNote, setFormNote] = useState("");
 
-  const [godTargetId, setGodTargetId] = useState("");
-  const [godSecondTargetId, setGodSecondTargetId] = useState("");
-  const [godMessage, setGodMessage] = useState("");
+  const [setupAId, setSetupAId] = useState("");
+  const [setupBId, setSetupBId] = useState("");
+  const [setupStatus, setSetupStatus] = useState("지인");
 
-  // ---------- localStorage: 새로고침 후에도 섬 상태 유지 ----------
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (typeof saved.islandName === "string") setIslandName(saved.islandName);
-        if (Array.isArray(saved.characters)) setCharacters(saved.characters);
-        if (saved.relationships && typeof saved.relationships === "object") setRelationships(saved.relationships);
-        if (Array.isArray(saved.eventLog)) setEventLog(saved.eventLog);
-        if (Array.isArray(saved.newsLog)) setNewsLog(saved.newsLog);
-        if (saved.turn !== undefined) setTurn(Number(saved.turn) || 0);
-        if (typeof saved.autoPlay === "boolean") setAutoPlay(saved.autoPlay);
-        if (Array.isArray(saved.pendingRequests)) setPendingRequests(saved.pendingRequests);
-        if (saved.namingBaby && typeof saved.namingBaby === "object") setNamingBaby(saved.namingBaby);
-        if (typeof saved.babyNameInput === "string") setBabyNameInput(saved.babyNameInput);
-      }
-    } catch (e) {
-      console.warn("저장된 섬 데이터를 불러오지 못했습니다.", e);
-    } finally {
-      setStorageLoaded(true);
-    }
-  }, []);
+  const [talkTargetId, setTalkTargetId] = useState("");
+  const [talkMessage, setTalkMessage] = useState("");
 
-  useEffect(() => {
-    if (!storageLoaded) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        islandName,
-        characters,
-        relationships,
-        eventLog,
-        newsLog,
-        turn,
-        autoPlay,
-        pendingRequests,
-        namingBaby,
-        babyNameInput
-      }));
-    } catch (e) {
-      console.warn("섬 데이터 저장에 실패했습니다.", e);
-    }
-  }, [
-    storageLoaded,
-    islandName,
-    characters,
-    relationships,
-    eventLog,
-    newsLog,
-    turn,
-    autoPlay,
-    pendingRequests,
-    namingBaby,
-    babyNameInput
-  ]);
+  const [giftTargetId, setGiftTargetId] = useState("");
+  const [giftSecondTargetId, setGiftSecondTargetId] = useState("");
+  const [godItems, setGodItems] = useState(DEFAULT_GOD_ITEMS);
+  const [customItemIcon, setCustomItemIcon] = useState("🎁");
+  const [customItemLabel, setCustomItemLabel] = useState("");
+  const [customItemType, setCustomItemType] = useState("hunger");
+  const [customItemAmount, setCustomItemAmount] = useState(30);
 
   const addResident = () => {
     const nm = formName.trim();
@@ -179,6 +172,7 @@ function MoaIslandSim() {
       partner: null,
       luckyTurns: 0,
       note: formNote.trim(),
+      keywords: extractKeywords(formNote.trim()),
     };
     setCharacters((prev) => [...prev, newChar]);
     setRelationships((prev) => {
@@ -204,65 +198,95 @@ function MoaIslandSim() {
       });
       return next;
     });
-    setGodTargetId((prev) => (prev === id ? "" : prev));
-    setGodSecondTargetId((prev) => (prev === id ? "" : prev));
+    setGiftTargetId((prev) => (prev === id ? "" : prev));
+    setGiftSecondTargetId((prev) => (prev === id ? "" : prev));
+    setTalkTargetId((prev) => (prev === id ? "" : prev));
+    setSelectedCharId((prev) => (prev === id ? null : prev));
+    setSetupAId((prev) => (prev === id ? "" : prev));
+    setSetupBId((prev) => (prev === id ? "" : prev));
     setPendingRequests((prev) => prev.filter((r) => r.aId !== id && r.bId !== id));
     setNamingBaby((prev) => (prev && (prev.aId === id || prev.bId === id) ? null : prev));
   };
 
   const resetAll = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {}
-    setIslandName("무지개 아일랜드");
     setCharacters([]);
     setRelationships({});
     setEventLog([]);
     setNewsLog([]);
     setTurn(0);
     setAutoPlay(false);
-    setGodTargetId("");
-    setGodSecondTargetId("");
-    setGodMessage("");
+    setGiftTargetId("");
+    setGiftSecondTargetId("");
+    setTalkTargetId("");
+    setTalkMessage("");
     setPendingRequests([]);
     setNamingBaby(null);
     setBabyNameInput("");
+    setSelectedCharId(null);
+    setSetupAId("");
+    setSetupBId("");
+    setSetupStatus("지인");
+    setGodItems(DEFAULT_GOD_ITEMS);
+  };
+
+  const applyInitialRelationship = () => {
+    if (!setupAId || !setupBId || setupAId === setupBId) return;
+    const preset = RELATION_PRESETS.find((p) => p.value === setupStatus) || RELATION_PRESETS[0];
+    const aChar = characters.find((c) => c.id === setupAId);
+    const bChar = characters.find((c) => c.id === setupBId);
+    if (!aChar || !bChar) return;
+    setRelationships((prev) => ({
+      ...prev,
+      [relKey(setupAId, setupBId)]: { score: preset.score, status: preset.value },
+    }));
+    if (preset.value === "연인" || preset.value === "결혼") {
+      setCharacters((prev) =>
+        prev.map((c) => (c.id === setupAId ? { ...c, partner: setupBId } : c.id === setupBId ? { ...c, partner: setupAId } : c))
+      );
+    }
+    setEventLog((prev) =>
+      [`🔧 [관계 설정] ${aChar.name}와(과) ${bChar.name}의 관계를 '${preset.value}'(으)로 설정했습니다.`, ...prev].slice(0, 100)
+    );
   };
 
   const talkToCharacter = () => {
-    if (!godTargetId || !godMessage.trim()) return;
-    const target = characters.find((c) => c.id === godTargetId);
+    if (!talkTargetId || !talkMessage.trim()) return;
+    const target = characters.find((c) => c.id === talkTargetId);
     if (!target) return;
-    const response = TALK_RESPONSES[randInt(0, TALK_RESPONSES.length - 1)];
-    const msg = godMessage.trim();
-    setCharacters((prev) => prev.map((c) => (c.id === godTargetId ? { ...c, loneliness: Math.max(0, c.loneliness - 30) } : c)));
+    const kw = target.keywords && target.keywords.length > 0 ? target.keywords[randInt(0, target.keywords.length - 1)] : null;
+    const response =
+      kw && Math.random() < 0.5
+        ? `제가 '${kw}' 얘기를 적어뒀던 거, 신께서도 알고 계셨군요! 그런 걸 알아봐 주시니 기뻐요.`
+        : TALK_RESPONSES[randInt(0, TALK_RESPONSES.length - 1)];
+    const msg = talkMessage.trim();
+    setCharacters((prev) => prev.map((c) => (c.id === talkTargetId ? { ...c, loneliness: Math.max(0, c.loneliness - 30) } : c)));
     setEventLog((prev) =>
       [`🌟 [신의 목소리] 당신 → ${target.name}: "${msg}"  💬 ${target.name}: "${response}"`, ...prev].slice(0, 100)
     );
-    setGodMessage("");
+    setTalkMessage("");
   };
 
   const giveItem = (item) => {
-    if (!godTargetId) return;
-    const target = characters.find((c) => c.id === godTargetId);
+    if (!giftTargetId) return;
+    const target = characters.find((c) => c.id === giftTargetId);
     if (!target) return;
 
     if (!item.needsTarget) {
       if (item.type === "hunger") {
-        setCharacters((prev) => prev.map((c) => (c.id === godTargetId ? { ...c, hunger: Math.max(0, c.hunger - item.amount) } : c)));
+        setCharacters((prev) => prev.map((c) => (c.id === giftTargetId ? { ...c, hunger: Math.max(0, c.hunger - item.amount) } : c)));
       } else if (item.type === "loneliness") {
-        setCharacters((prev) => prev.map((c) => (c.id === godTargetId ? { ...c, loneliness: Math.max(0, c.loneliness - item.amount) } : c)));
+        setCharacters((prev) => prev.map((c) => (c.id === giftTargetId ? { ...c, loneliness: Math.max(0, c.loneliness - item.amount) } : c)));
       } else if (item.type === "luck") {
-        setCharacters((prev) => prev.map((c) => (c.id === godTargetId ? { ...c, luckyTurns: 3 } : c)));
+        setCharacters((prev) => prev.map((c) => (c.id === giftTargetId ? { ...c, luckyTurns: 3 } : c)));
       }
       setEventLog((prev) =>
         [`🎁 [신의 선물] 당신이 ${target.name}에게 ${item.icon} ${item.label}을(를) 선물했습니다. ${target.name}가 매우 기뻐합니다!`, ...prev].slice(0, 100)
       );
     } else {
-      if (!godSecondTargetId || godSecondTargetId === godTargetId) return;
-      const partnerChar = characters.find((c) => c.id === godSecondTargetId);
+      if (!giftSecondTargetId || giftSecondTargetId === giftTargetId) return;
+      const partnerChar = characters.find((c) => c.id === giftSecondTargetId);
       if (!partnerChar) return;
-      const key = relKey(godTargetId, godSecondTargetId);
+      const key = relKey(giftTargetId, giftSecondTargetId);
       if (item.type === "relationship") {
         setRelationships((prev) => {
           const cur = prev[key] || { score: 0, status: "지인" };
@@ -288,7 +312,39 @@ function MoaIslandSim() {
         );
       }
     }
-    setGodSecondTargetId("");
+    setGiftSecondTargetId("");
+  };
+
+  const addCustomItem = () => {
+    const label = customItemLabel.trim();
+    if (!label) return;
+    const needsTarget = customItemType === "relationship" || customItemType === "reconcile";
+    const desc =
+      customItemType === "hunger"
+        ? `배고픔 -${customItemAmount}`
+        : customItemType === "loneliness"
+        ? `외로움 -${customItemAmount}`
+        : customItemType === "luck"
+        ? "3턴 동안 상호작용이 잘 풀려요"
+        : customItemType === "relationship"
+        ? `지목한 상대와 호감도 +${customItemAmount}`
+        : "마이너스 호감도를 0으로 씻어줘요";
+    const newItem = {
+      id: `custom-${Date.now()}`,
+      icon: customItemIcon.trim() || "🎁",
+      label,
+      desc,
+      type: customItemType,
+      amount: customItemAmount,
+      needsTarget,
+      custom: true,
+    };
+    setGodItems((prev) => [...prev, newItem]);
+    setCustomItemLabel("");
+  };
+
+  const removeCustomItem = (id) => {
+    setGodItems((prev) => prev.filter((i) => i.id !== id));
   };
 
   const resolveRequest = (requestId, approve) => {
@@ -306,7 +362,7 @@ function MoaIslandSim() {
           return { ...prev, [key]: { ...cur, status: "연인" } };
         });
         setEventLog((prev) => [`💖 [신의 축복] 당신의 허락으로 ${a.name}와(과) ${b.name}가 연인이 되었습니다!`, ...prev].slice(0, 100));
-        setNewsLog((prev) => [...prev, `🎉 축하합니다! ${a.name}님과 ${b.name}님이 연애를 시작했습니다! (Turn ${turn})`]);
+        setNewsLog((prev) => [...prev, { text: `🎉 축하합니다! ${a.name}님과 ${b.name}님이 연애를 시작했습니다! (Turn ${turn})`, category: "romance" }]);
         setPendingRequests((prev) =>
           prev.filter((r) => r.id !== requestId && !(r.type === "confess" && (r.aId === req.aId || r.bId === req.aId || r.aId === req.bId || r.bId === req.bId)))
         );
@@ -329,7 +385,7 @@ function MoaIslandSim() {
           return { ...prev, [key]: { ...cur, status: "결혼" } };
         });
         setEventLog((prev) => [`🎊 [신의 축복] 당신의 허락으로 ${a.name}와(과) ${b.name}가 결혼식을 올렸습니다!`, ...prev].slice(0, 100));
-        setNewsLog((prev) => [...prev, `💒 축하합니다! ${a.name}님과 ${b.name}님이 결혼했습니다! (Turn ${turn})`]);
+        setNewsLog((prev) => [...prev, { text: `💒 축하합니다! ${a.name}님과 ${b.name}님이 결혼했습니다! (Turn ${turn})`, category: "romance" }]);
       } else if (a && b) {
         setRelationships((prev) => {
           const key = relKey(req.aId, req.bId);
@@ -386,6 +442,8 @@ function MoaIslandSim() {
       loneliness: randInt(10, 30),
       partner: null,
       luckyTurns: 0,
+      note: "",
+      keywords: Array.from(new Set([...(a.keywords || []), ...(b.keywords || [])])).slice(0, 8),
     };
     setCharacters((prev) => [...prev, baby]);
     setRelationships((prev) => {
@@ -400,7 +458,7 @@ function MoaIslandSim() {
     setEventLog((prev) =>
       [`👶 [신의 축복] 당신이 지어준 이름 '${name}'을(를) 가진 아기가 ${a.name}와(과) ${b.name} 사이에서 태어났습니다!`, ...prev].slice(0, 100)
     );
-    setNewsLog((prev) => [...prev, `👶✨ 2세 탄생! ${a.name}님과 ${b.name}님이 부모가 되어 '${name}'을(를) 맞이했습니다! (Turn ${turn})`]);
+    setNewsLog((prev) => [...prev, { text: `👶✨ 2세 탄생! ${a.name}님과 ${b.name}님이 부모가 되어 '${name}'을(를) 맞이했습니다! (Turn ${turn})`, category: "romance" }]);
     setNamingBaby(null);
     setBabyNameInput("");
   };
@@ -443,16 +501,29 @@ function MoaIslandSim() {
       const r = getRel(aId, bId);
       const compatibility = 1 - Math.abs(a.sociability - b.sociability);
       const luckyBonus = a.luckyTurns > 0 ? 0.2 : 0;
-      const successChance = 0.5 + r.score / 200 + compatibility * 0.2 - a.emotional * 0.1 + luckyBonus;
+      const sharedInterests = (a.keywords || []).filter((k) => (b.keywords || []).includes(k));
+      const interestBonus = sharedInterests.length > 0 ? 0.15 : 0;
+      const successChance = 0.5 + r.score / 200 + compatibility * 0.2 - a.emotional * 0.1 + luckyBonus + interestBonus;
 
       a.loneliness = Math.max(0, a.loneliness - 30);
       b.loneliness = Math.max(0, b.loneliness - 20);
 
       if (Math.random() < successChance) {
-        const delta = randInt(8, 15);
+        let delta = randInt(8, 15);
+        let useTopic = false;
+        let topic = null;
+        if (sharedInterests.length > 0 && Math.random() < 0.5) {
+          topic = sharedInterests[randInt(0, sharedInterests.length - 1)];
+          delta += 5;
+          useTopic = true;
+        }
         const newScore = Math.min(100, r.score + delta);
         setRel(aId, bId, { score: newScore, status: r.status });
-        log.push(`💬 ${a.name}가 ${b.name}에게 유쾌한 이야기를 건넸습니다. (호감도 +${delta} → 현재: ${newScore})`);
+        log.push(
+          useTopic
+            ? `💫 ${a.name}와(과) ${b.name}는 서로 적어둔 '${topic}' 이야기로 더욱 가까워졌습니다! (호감도 +${delta} → 현재: ${newScore})`
+            : `💬 ${a.name}가 ${b.name}에게 유쾌한 이야기를 건넸습니다. (호감도 +${delta} → 현재: ${newScore})`
+        );
         updateRelationshipStatus(aId, bId);
         const r2 = getRel(aId, bId);
         if (r2.score >= 80 && !a.partner && !b.partner) {
@@ -483,6 +554,12 @@ function MoaIslandSim() {
       c.hunger = Math.min(100, c.hunger + randInt(5, 12));
       c.loneliness = Math.min(100, c.loneliness + randInt(5, 15));
       c.luckyTurns = Math.max(0, (c.luckyTurns || 0) - 1);
+      if (Math.random() < 0.05) {
+        const eventFn = QUIRKY_EVENTS[randInt(0, QUIRKY_EVENTS.length - 1)];
+        const text = eventFn(c.name);
+        log.push(text);
+        if (Math.random() < 0.4) news.push({ text, category: "other" });
+      }
     });
 
     ids.forEach((id) => {
@@ -554,9 +631,14 @@ function MoaIslandSim() {
   pairList.sort((x, y) => y.r.score - x.r.score);
 
   const marriageCount = pairList.filter((p) => p.r.status === "결혼").length;
-  const babyCount = newsLog.filter((n) => n.includes("2세 탄생")).length;
-  const godTargetName = characters.find((c) => c.id === godTargetId)?.name;
+  const romanceNews = newsLog.filter((n) => n.category === "romance");
+  const otherNews = newsLog.filter((n) => n.category === "other");
+  const babyCount = romanceNews.filter((n) => n.text.includes("2세 탄생")).length;
+  const talkTargetName = characters.find((c) => c.id === talkTargetId)?.name;
   const isPaused = pendingRequests.length > 0 || !!namingBaby;
+  const selectedChar = characters.find((c) => c.id === selectedCharId);
+  const displayedPairs = selectedCharId ? pairList.filter((p) => p.a.id === selectedCharId || p.b.id === selectedCharId) : pairList;
+  const displayIslandName = islandName.trim() || "우리 섬";
 
   return (
     <div className="app">
@@ -593,18 +675,28 @@ function MoaIslandSim() {
         .island-name-input { font-weight: 800; font-size: 15px; border: none; border-bottom: 2px solid var(--line); text-align: center; background: transparent; padding: 2px 4px; }
         .island-name-input:focus { outline: none; border-color: var(--accent); }
         .site-tagline { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+        .help-btn { margin-top: 10px; }
+
+        .help-overlay { position: fixed; inset: 0; background: rgba(51, 34, 38, 0.55); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+        .help-modal { background: var(--card); border-radius: 16px; max-width: 540px; width: 100%; max-height: 82vh; overflow-y: auto; padding: 22px 24px; }
+        .help-modal h3 { margin: 14px 0 4px; font-size: 13.5px; color: var(--accent); }
+        .help-modal p { margin: 0 0 4px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; }
+        .help-close-row { text-align: right; margin-top: 16px; }
 
         .container { max-width: 980px; margin: 0 auto; padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 18px; }
         .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
         .section-title { font-weight: 800; font-size: 15.5px; margin: 0 0 12px; display: flex; align-items: center; gap: 6px; }
+        .section-header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .section-header-row .section-title { margin-bottom: 0; }
 
         .add-form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
         .add-form-row input[type=text] { flex: 1; min-width: 140px; font-size: 13px; padding: 8px 11px; border: 1.5px solid var(--line); border-radius: 8px; }
         .type-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
         .type-chip { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; border: 1.5px solid var(--line); background: #fff; cursor: pointer; font-weight: 600; }
         .type-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-        .note-input { width: 100%; font-family: 'Noto Sans KR', sans-serif; font-size: 12.5px; padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 8px; resize: vertical; margin-bottom: 12px; }
+        .note-input { width: 100%; font-family: 'Noto Sans KR', sans-serif; font-size: 12.5px; padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 8px; resize: vertical; margin-bottom: 6px; }
         .note-input:focus { outline: none; border-color: var(--accent); }
+        .note-hint { font-size: 10.5px; color: var(--ink-soft); margin: 0 0 12px; }
         .slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12px; color: var(--ink-soft); }
         .slider-row label { width: 84px; flex-shrink: 0; }
         .slider-row input[type=range] { flex: 1; }
@@ -620,12 +712,19 @@ function MoaIslandSim() {
         .turn-badge { font-family: 'IBM Plex Mono', monospace; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; }
         .pause-note { font-size: 11.5px; color: var(--warn); font-weight: 700; }
 
+        .setup-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .setup-select { font-size: 13px; padding: 7px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; min-width: 130px; }
+
         .resident-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 12px; margin-top: 14px; }
-        .r-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; position: relative; }
+        .r-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; position: relative; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+        .r-card:hover { border-color: var(--accent); }
+        .r-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
         .r-card-name { font-weight: 800; font-size: 14px; padding-right: 22px; }
         .r-card-type { font-size: 11px; color: var(--ink-soft); margin-bottom: 6px; }
         .r-card-note { font-size: 10.5px; color: var(--ink-soft); font-style: italic; line-height: 1.4; margin-bottom: 8px; white-space: pre-wrap; word-break: break-word; }
-        .r-remove { position: absolute; top: 10px; right: 10px; border: none; background: transparent; color: var(--ink-soft); cursor: pointer; font-weight: 800; }
+        .keyword-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+        .keyword-chip { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 999px; }
+        .r-remove { position: absolute; top: 10px; right: 10px; border: none; background: transparent; color: var(--ink-soft); cursor: pointer; font-weight: 800; z-index: 2; }
         .stat-row { margin-bottom: 6px; }
         .stat-label { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-soft); margin-bottom: 2px; }
         .stat-track { height: 6px; background: var(--line); border-radius: 4px; overflow: hidden; }
@@ -643,18 +742,27 @@ function MoaIslandSim() {
         .log-line { padding: 5px 8px; border-radius: 7px; background: var(--bg); }
         .news-list { display: flex; flex-direction: column; gap: 6px; }
         .news-line { padding: 8px 12px; border-radius: 9px; background: var(--gold-soft); color: #6b4f14; font-size: 12.5px; font-weight: 700; }
+        .news-line.other { background: var(--good-soft); color: #1d5b4d; }
 
         .god-card { border-color: var(--accent); }
         .god-select-row { margin-bottom: 10px; }
         .god-select { font-size: 13px; padding: 7px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; min-width: 170px; }
-        .god-talk-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .god-talk-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
         .god-talk-row input[type=text] { flex: 1; min-width: 180px; font-size: 13px; padding: 8px 11px; border: 1.5px solid var(--line); border-radius: 8px; }
         .god-item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-        .god-item-card { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+        .god-item-card { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center; position: relative; }
         .god-item-icon { font-size: 22px; }
         .god-item-label { font-weight: 800; font-size: 12.5px; }
         .god-item-desc { font-size: 10.5px; color: var(--ink-soft); line-height: 1.4; }
         .god-select-small { font-size: 11px; padding: 4px 6px; border: 1.5px solid var(--line); border-radius: 6px; width: 100%; }
+        .item-remove { position: absolute; top: 4px; right: 6px; border: none; background: transparent; color: var(--ink-soft); cursor: pointer; font-weight: 800; font-size: 12px; }
+
+        .custom-item-form { margin-top: 16px; padding-top: 16px; border-top: 1.5px dashed var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .custom-item-title { font-weight: 800; font-size: 12.5px; width: 100%; margin-bottom: 4px; }
+        .custom-item-form input[type=text], .custom-item-form select, .custom-item-form input[type=number] { font-size: 12.5px; padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; }
+        .icon-input { width: 52px; text-align: center; }
+        .label-input { flex: 1; min-width: 110px; }
+        .amount-input { width: 72px; }
 
         .request-card { border-color: var(--gold); }
         .request-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--gold-soft); margin-bottom: 8px; font-size: 12.5px; }
@@ -669,10 +777,40 @@ function MoaIslandSim() {
       <div className="site-bar">
         <div className="site-title-row">
           <span className="site-title">🏝️</span>
-          <input className="island-name-input" value={islandName} maxLength={14} onChange={(e) => setIslandName(e.target.value)} />
+          <input className="island-name-input" value={islandName} maxLength={14} placeholder="섬 이름을 입력하세요" onChange={(e) => setIslandName(e.target.value)} />
         </div>
         <div className="site-tagline">주민들의 배고픔·외로움·호감도가 자동으로 움직이는 관계 시뮬레이터</div>
+        <button className="btn btn-ghost help-btn" onClick={() => setShowHelp(true)} type="button">
+          ❓ 사용 방법
+        </button>
       </div>
+
+      {showHelp && (
+        <div className="help-overlay" onClick={() => setShowHelp(false)}>
+          <div className="help-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 className="section-title">❓ 사용 방법</h2>
+            <h3>👤 주민 추가</h3>
+            <p>이름과 성격 유형을 정하고, 자유 설명란에 취향이나 말투를 적어보세요. 적은 단어는 관심사로 학습돼서 비슷한 관심사를 가진 주민끼리 더 잘 통해요. 최대 {MAX_RESIDENTS}명까지 추가할 수 있어요.</p>
+            <h3>🔗 관계 미리 설정하기</h3>
+            <p>두 주민을 골라 시작부터 특정 관계(친구, 절친, 앙숙, 연인, 결혼)로 설정할 수 있어요.</p>
+            <h3>▶ 다음 턴 / 자동 재생</h3>
+            <p>턴이 지날 때마다 주민들의 배고픔·외로움이 변하고 서로 상호작용해요. 가끔 예상치 못한 기행이나 신기한 사건도 벌어져요.</p>
+            <h3>🙏 신의 뜻</h3>
+            <p>고백·결혼·출산처럼 중요한 순간에는 신(당신)의 허락이 필요해요. '허락한다' / '안된다' 버튼으로 결정하면 진행이 이어져요.</p>
+            <h3>🗣️ 신과의 대화 / 🎁 신의 선물</h3>
+            <p>원하는 주민에게 직접 말을 걸거나 아이템을 선물할 수 있어요. 아래쪽 '나만의 아이템 만들기'로 이름과 효과를 정해 새 음식·선물도 추가할 수 있어요.</p>
+            <h3>💞 관계도</h3>
+            <p>주민 카드를 터치하면 그 주민의 관계만 모아 볼 수 있어요. 다시 누르거나 '전체보기'를 누르면 원래대로 돌아와요.</p>
+            <h3>📰 소식</h3>
+            <p>연애·결혼·출산 소식은 '연애 소식'에, 그 외 신기한 사건들은 '아일랜드 소식'에 따로 모여요.</p>
+            <div className="help-close-row">
+              <button className="btn btn-accent" onClick={() => setShowHelp(false)} type="button">
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="container">
         <div className="card">
@@ -708,6 +846,7 @@ function MoaIslandSim() {
             rows={3}
             onChange={(e) => setFormNote(e.target.value)}
           />
+          <div className="note-hint">💡 여기 적은 단어는 관심사로 학습돼서, 비슷한 걸 적은 주민끼리는 더 잘 통해요!</div>
           <div className="slider-row">
             <label>사교성</label>
             <input type="range" min="0" max="100" step="5" value={formSoc} onChange={(e) => setFormSoc(Number(e.target.value))} />
@@ -723,8 +862,49 @@ function MoaIslandSim() {
           </button>
         </div>
 
+        {characters.length >= 2 && (
+          <div className="card">
+            <h2 className="section-title">🔗 관계 미리 설정하기</h2>
+            <div className="setup-row">
+              <select className="setup-select" value={setupAId} onChange={(e) => setSetupAId(e.target.value)}>
+                <option value="">-- 주민 A --</option>
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <span>↔</span>
+              <select className="setup-select" value={setupBId} onChange={(e) => setSetupBId(e.target.value)}>
+                <option value="">-- 주민 B --</option>
+                {characters
+                  .filter((c) => c.id !== setupAId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+              <select className="setup-select" value={setupStatus} onChange={(e) => setSetupStatus(e.target.value)}>
+                {RELATION_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-accent"
+                onClick={applyInitialRelationship}
+                disabled={!setupAId || !setupBId || setupAId === setupBId}
+              >
+                관계 설정하기
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="card">
-          <h2 className="section-title">🏠 {islandName} 주민</h2>
+          <h2 className="section-title">🏠 {displayIslandName} 주민</h2>
           <div className="control-row">
             <button className="btn btn-accent" onClick={step} disabled={characters.length === 0 || isPaused}>
               다음 턴 ▶
@@ -760,13 +940,33 @@ function MoaIslandSim() {
                   (other) => other.id !== c.id && (relationships[relKey(c.id, other.id)] || {}).status === "가족"
                 );
                 return (
-                  <div className="r-card" key={c.id}>
-                    <button className="r-remove" onClick={() => removeResident(c.id)} aria-label={`${c.name} 내보내기`}>
+                  <div
+                    className={"r-card" + (selectedCharId === c.id ? " r-card-selected" : "")}
+                    key={c.id}
+                    onClick={() => setSelectedCharId((prev) => (prev === c.id ? null : c.id))}
+                  >
+                    <button
+                      className="r-remove"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeResident(c.id);
+                      }}
+                      aria-label={`${c.name} 내보내기`}
+                    >
                       ×
                     </button>
                     <div className="r-card-name">{c.name}</div>
                     <div className="r-card-type">{c.personalityType}</div>
                     {c.note && <div className="r-card-note">{c.note}</div>}
+                    {c.keywords && c.keywords.length > 0 && (
+                      <div className="keyword-row">
+                        {c.keywords.map((k) => (
+                          <span className="keyword-chip" key={k}>
+                            #{k}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="stat-row">
                       <div className="stat-label">
                         <span>배고픔</span>
@@ -862,9 +1062,9 @@ function MoaIslandSim() {
 
         {characters.length > 0 && (
           <div className="card god-card">
-            <h2 className="section-title">🌟 신의 권능</h2>
+            <h2 className="section-title">🗣️ 신과의 대화</h2>
             <div className="god-select-row">
-              <select className="god-select" value={godTargetId} onChange={(e) => setGodTargetId(e.target.value)}>
+              <select className="god-select" value={talkTargetId} onChange={(e) => setTalkTargetId(e.target.value)}>
                 <option value="">-- 대상 주민 선택 --</option>
                 {characters.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -876,30 +1076,51 @@ function MoaIslandSim() {
             <div className="god-talk-row">
               <input
                 type="text"
-                placeholder={godTargetName ? `${godTargetName}에게 하고 싶은 말을 입력하세요` : "먼저 대상 주민을 선택하세요"}
-                value={godMessage}
+                placeholder={talkTargetName ? `${talkTargetName}에게 하고 싶은 말을 입력하세요` : "먼저 대상 주민을 선택하세요"}
+                value={talkMessage}
                 maxLength={60}
-                disabled={!godTargetId}
-                onChange={(e) => setGodMessage(e.target.value)}
+                disabled={!talkTargetId}
+                onChange={(e) => setTalkMessage(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") talkToCharacter();
                 }}
               />
-              <button className="btn btn-accent" onClick={talkToCharacter} disabled={!godTargetId || !godMessage.trim()}>
+              <button className="btn btn-accent" onClick={talkToCharacter} disabled={!talkTargetId || !talkMessage.trim()}>
                 말 걸기 🗣️
               </button>
             </div>
+          </div>
+        )}
+
+        {characters.length > 0 && (
+          <div className="card god-card">
+            <h2 className="section-title">🎁 신의 선물</h2>
+            <div className="god-select-row">
+              <select className="god-select" value={giftTargetId} onChange={(e) => setGiftTargetId(e.target.value)}>
+                <option value="">-- 대상 주민 선택 --</option>
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="god-item-grid">
-              {GOD_ITEMS.map((item) => (
+              {godItems.map((item) => (
                 <div className="god-item-card" key={item.id}>
+                  {item.custom && (
+                    <button className="item-remove" onClick={() => removeCustomItem(item.id)} type="button" aria-label="아이템 삭제">
+                      ×
+                    </button>
+                  )}
                   <div className="god-item-icon">{item.icon}</div>
                   <div className="god-item-label">{item.label}</div>
                   <div className="god-item-desc">{item.desc}</div>
                   {item.needsTarget && (
-                    <select className="god-select-small" value={godSecondTargetId} onChange={(e) => setGodSecondTargetId(e.target.value)}>
+                    <select className="god-select-small" value={giftSecondTargetId} onChange={(e) => setGiftSecondTargetId(e.target.value)}>
                       <option value="">상대 선택</option>
                       {characters
-                        .filter((c) => c.id !== godTargetId)
+                        .filter((c) => c.id !== giftTargetId)
                         .map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name}
@@ -910,42 +1131,107 @@ function MoaIslandSim() {
                   <button
                     className="btn btn-ghost"
                     onClick={() => giveItem(item)}
-                    disabled={!godTargetId || (item.needsTarget && !godSecondTargetId)}
+                    disabled={!giftTargetId || (item.needsTarget && !giftSecondTargetId)}
                   >
                     선물하기
                   </button>
                 </div>
               ))}
             </div>
+
+            <div className="custom-item-form">
+              <div className="custom-item-title">➕ 나만의 아이템 만들기</div>
+              <input
+                type="text"
+                className="icon-input"
+                value={customItemIcon}
+                maxLength={2}
+                onChange={(e) => setCustomItemIcon(e.target.value)}
+                placeholder="🎁"
+              />
+              <input
+                type="text"
+                className="label-input"
+                value={customItemLabel}
+                maxLength={16}
+                onChange={(e) => setCustomItemLabel(e.target.value)}
+                placeholder="아이템 이름 (예: 딸기 케이크)"
+              />
+              <select value={customItemType} onChange={(e) => setCustomItemType(e.target.value)}>
+                <option value="hunger">배고픔 감소</option>
+                <option value="loneliness">외로움 감소</option>
+                <option value="luck">행운 부여</option>
+                <option value="relationship">호감도 상승 (상대 지정)</option>
+                <option value="reconcile">화해 (상대 지정)</option>
+              </select>
+              {(customItemType === "hunger" || customItemType === "loneliness" || customItemType === "relationship") && (
+                <input
+                  type="number"
+                  className="amount-input"
+                  min="5"
+                  max="100"
+                  step="5"
+                  value={customItemAmount}
+                  onChange={(e) => setCustomItemAmount(Number(e.target.value))}
+                />
+              )}
+              <button className="btn btn-accent" onClick={addCustomItem} disabled={!customItemLabel.trim()} type="button">
+                아이템 추가
+              </button>
+            </div>
           </div>
         )}
 
         {characters.length >= 2 && (
           <div className="card">
-            <h2 className="section-title">💞 주민 관계도</h2>
-            <div className="rel-list">
-              {pairList.map(({ a, b, r }) => (
-                <div className="rel-item" key={`${a.id}-${b.id}`}>
-                  <span className="rel-names">
-                    {a.name} ↔ {b.name}
-                  </span>
-                  <span className="rel-badge" style={{ background: statusColor(r.status) }}>
-                    {r.status}
-                  </span>
-                  <span className="rel-score">{r.score}</span>
+            <div className="section-header-row">
+              <h2 className="section-title">💞 {selectedChar ? `${selectedChar.name}의 관계` : "주민 관계도"}</h2>
+              {selectedChar && (
+                <button className="btn btn-ghost" onClick={() => setSelectedCharId(null)} type="button">
+                  전체보기
+                </button>
+              )}
+            </div>
+            {displayedPairs.length === 0 ? (
+              <div className="empty-state">아직 관계가 없어요.</div>
+            ) : (
+              <div className="rel-list">
+                {displayedPairs.map(({ a, b, r }) => (
+                  <div className="rel-item" key={`${a.id}-${b.id}`}>
+                    <span className="rel-names">
+                      {a.name} ↔ {b.name}
+                    </span>
+                    <span className="rel-badge" style={{ background: statusColor(r.status) }}>
+                      {r.status}
+                    </span>
+                    <span className="rel-score">{r.score}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {romanceNews.length > 0 && (
+          <div className="card">
+            <h2 className="section-title">💕 연애 소식</h2>
+            <div className="news-list">
+              {[...romanceNews].reverse().map((n, i) => (
+                <div className="news-line" key={i}>
+                  {n.text}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {newsLog.length > 0 && (
+        {otherNews.length > 0 && (
           <div className="card">
-            <h2 className="section-title">📰 아일랜드 주요 뉴스</h2>
+            <h2 className="section-title">📰 아일랜드 소식</h2>
             <div className="news-list">
-              {[...newsLog].reverse().map((n, i) => (
-                <div className="news-line" key={i}>
-                  {n}
+              {[...otherNews].reverse().map((n, i) => (
+                <div className="news-line other" key={i}>
+                  {n.text}
                 </div>
               ))}
             </div>
